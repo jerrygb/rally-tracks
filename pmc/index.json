@@ -2,7 +2,25 @@
   "settings": {
     "index.number_of_shards": {{number_of_shards | default(5)}},
     "index.number_of_replicas": {{number_of_replicas | default(0)}},
-    "index.requests.cache.enable": false
+    "index.requests.cache.enable": false,
+    "analysis" : {
+      "filter" : {
+        "english_stemmer" : {
+          "type" : "stemmer",
+          "language" : "english"
+        },
+        "english_possessive_stemmer" : {
+          "type" : "stemmer",
+          "language" : "possessive_english"
+        }
+      },
+      "analyzer" : {
+        "rebuilt_english" : {
+          "filter" : [ "english_possessive_stemmer", "lowercase", "english_stemmer" ],
+          "tokenizer" : "standard"
+        }
+      }
+    }
   },
   "mappings": {
     "_source": {
@@ -36,7 +54,8 @@
         "type": "integer"
       },
       "body": {
-        "type": "text"
+        "type": "text",
+        "analyzer": "rebuilt_english"
       }
     }
   }

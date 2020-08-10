@@ -162,217 +162,125 @@
       ]
     },
     {
-      "name": "search-terms-phrases-perform-aggregations",
-      "description": "Search terms, phrases and perform aggregations and get response",
+      "name": "append-sorted-no-conflicts",
+      "description": "Indexes the whole document corpus in an index sorted by timestamp field in descending order (most recent first). Document ids are unique so all index operations are append only.",
       "schedule": [
         {
-          "operation": "force-merge",
-          "clients": 1
+          "operation": "delete-index"
         },
         {
           "operation": {
-            "name": "match-all-query",
-            "operation-type": "search",
-            "response-compression-enabled": false,
-            "body": {
-              "query": {
-                "match_all": {}
-              }
+            "operation-type": "create-index",
+            "settings": {%- if index_settings is defined %} {{index_settings | tojson}} {%- else %} {
+              "index.sort.field": "timestamp",
+              "index.sort.order": "desc"
+            }{%- endif %}
+          }
+        },
+        {
+          "name": "check-cluster-health",
+          "operation": {
+            "operation-type": "cluster-health",
+            "index": "pmc",
+            "request-params": {
+              "wait_for_status": "{{cluster_health | default('green')}}",
+              "wait_for_no_relocating_shards": "true"
             }
-          },
-          "clients": 5,
-          "warmup-iterations": 1000,
-          "iterations": 1000,
-          "target-throughput": 100
+          }
+        },
+        {
+          "operation": "index-append",
+          "warmup-time-period": 240,
+          "clients": {{bulk_indexing_clients | default(8)}}
+        },
+        {
+          "name": "refresh-after-index",
+          "operation": "refresh"
         },
         {
           "operation": {
-            "name": "match-all-query-compressed",
-            "operation-type": "search",
-            "response-compression-enabled": true,
-            "body": {
-              "query": {
-                "match_all": {}
-              }
-            }
-          },
-          "clients": 5,
-          "warmup-iterations": 1000,
-          "iterations": 1000,
-          "target-throughput": 100
+            "operation-type": "force-merge",
+            "request-timeout": 7200
+          }
         },
         {
-          "operation": {
-            "name": "match-phrase",
-            "operation-type": "search",
-            "response-compression-enabled": false,
-            "body": {
-              "query": {
-                "match_phrase": {
-                  "body": "newspaper coverage"
-                }
-              }
-            }
-          },
-          "clients": 5,
-          "warmup-iterations": 1000,
-          "iterations": 1000,
-          "target-throughput": 100
+          "name": "refresh-after-force-merge",
+          "operation": "refresh"
         },
         {
+          "name": "wait-until-merges-finish",
           "operation": {
-            "name": "match-phrase-compressed",
-            "operation-type": "search",
-            "response-compression-enabled": true,
-            "body": {
-              "query": {
-                "match_phrase": {
-                  "body": "newspaper coverage"
-                }
-              }
-            }
-          },
-          "clients": 5,
-          "warmup-iterations": 1000,
-          "iterations": 1000,
-          "target-throughput": 100
-        },
-        {
-          "operation": {
-            "name": "match-term",
-            "operation-type": "search",
-            "response-compression-enabled": false,
-            "body": {
-              "query": {
-                "term": {
-                  "body": "physician"
-                }
-              }
-            }
-          },
-          "clients": 5,
-          "warmup-iterations": 1000,
-          "iterations": 1000,
-          "target-throughput": 100
-        },
-        {
-          "operation": {
-            "name": "match-term-compressed",
-            "operation-type": "search",
-            "response-compression-enabled": true,
-            "body": {
-              "query": {
-                "term": {
-                  "body": "physician"
-                }
-              }
-            }
-          },
-          "clients": 5,
-          "warmup-iterations": 1000,
-          "iterations": 1000,
-          "target-throughput": 100
-        },
-        {
-          "operation": {
-            "name": "match-articles-monthly",
-            "operation-type": "search",
-            "body": {
-              "size": 0,
-              "aggs": {
-                "articles_over_time": {
-                  "date_histogram": {
-                    "field": "timestamp",
-                    "calendar_interval": "month"
-                  }
-                }
-              }
-            }
-          },
-          "clients": 2,
-          "warmup-iterations": 10,
-          "iterations": 100,
-          "target-throughput": 100
-        },
-        {
-          "operation": {
-            "name": "match-articles-monthly-cached",
-            "operation-type": "search",
-            "cache": true,
-            "body": {
-              "size": 0,
-              "aggs": {
-                "articles_over_time": {
-                  "date_histogram": {
-                    "field": "timestamp",
-                    "calendar_interval": "month"
-                  }
-                }
-              }
-            }
-          },
-          "clients": 2,
-          "warmup-iterations": 10,
-          "iterations": 100,
-          "target-throughput": 100
+            "operation-type": "index-stats",
+            "index": "_all",
+            "condition": {
+              "path": "_all.total.merges.current",
+              "expected-value": 0
+            },
+            "retry-until-success": true,
+            "include-in-reporting": false
+          }
         }
       ]
     },
     {
-      "name": "search-terms-with-filters",
-      "description": "Search terms with filters",
+      "name": "append-fast-with-conflicts",
+      "description": "Indexes the whole document corpus using a setup that will lead to a larger indexing throughput than the default settings. Rally will produce duplicate ids in 25% of all documents (not configurable) so we can simulate a scenario with appends most of the time and some updates in between.",
       "schedule": [
         {
-          "operation": "force-merge",
-          "clients": 1
+          "operation": "delete-index"
         },
         {
           "operation": {
-            "name": "large_filtered_terms",
-            "operation-type": "search",
-            "param-source": "filtered-terms-query-source",
-            "search-term": "newspaper"
-          },
-          "clients": 5,
-          "warmup-iterations": 10,
-          "iterations": 100,
-          "target-throughput": 1.1
+            "operation-type": "create-index",
+            "settings": {%- if index_settings is defined %} {{index_settings | tojson}} {%- else %} {
+              "index.refresh_interval": "30s",
+              "index.number_of_shards": {{number_of_shards | default(6)}},
+              "index.translog.flush_threshold_size": "4g"
+            }{%- endif %}
+          }
+        },
+        {
+          "name": "check-cluster-health",
+          "operation": {
+            "operation-type": "cluster-health",
+            "index": "pmc",
+            "request-params": {
+              "wait_for_status": "{{cluster_health | default('green')}}",
+              "wait_for_no_relocating_shards": "true"
+            }
+          }
+        },
+        {
+          "operation": "index-update",
+          "warmup-time-period": 240,
+          "clients": {{bulk_indexing_clients | default(8)}}
+        },
+        {
+          "name": "refresh-after-index",
+          "operation": "refresh"
         },
         {
           "operation": {
-            "name": "large_filtered_terms_phrase",
-            "operation-type": "search",
-            "param-source": "filtered-terms-phrase-query-source",
-            "search-phrase": "newspaper coverage"
-          },
-          "clients": 5,
-          "warmup-iterations": 10,
-          "iterations": 100,
-          "target-throughput": 1.1
+            "operation-type": "force-merge",
+            "request-timeout": 7200
+          }
         },
         {
-          "operation": {
-            "name": "large_filtered_terms_phrase_analyzer",
-            "operation-type": "search",
-            "param-source": "filtered-terms-phrase-query-analyze-source",
-            "search-phrase": "newspapers coverages"
-          },
-          "clients": 5,
-          "warmup-iterations": 10,
-          "iterations": 100,
-          "target-throughput": 1.1
+          "name": "refresh-after-force-merge",
+          "operation": "refresh"
         },
         {
+          "name": "wait-until-merges-finish",
           "operation": {
-            "name": "large_filtered_terms_phrase_posessive_analyzer",
-            "operation-type": "search",
-            "param-source": "filtered-terms-phrase-query-analyze-source",
-            "search-phrase": "newspaper's coverages"
-          },
-          "clients": 5,
-          "warmup-iterations": 10,
-          "iterations": 100,
-          "target-throughput": 1.1
+            "operation-type": "index-stats",
+            "index": "_all",
+            "condition": {
+              "path": "_all.total.merges.current",
+              "expected-value": 0
+            },
+            "retry-until-success": true,
+            "include-in-reporting": false
+          }
         }
       ]
     }
